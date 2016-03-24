@@ -3,6 +3,9 @@ setwd("~/Google Drive/Grad School/Programming Practice/Shelter Outcomes")
 library(plyr)
 library(randomForest)
 library(rpart)
+library(e1071)
+library(gbm)
+library(lubridate)
 
 train <- read.csv("train")
 test <- read.csv("test")
@@ -17,6 +20,8 @@ summary(test)
 #########################################
 ## FEATURE CREATION/CLEANUP: TRAIN SET ##
 #########################################
+
+train$hourOutcome <- hour(train$DateTime)
 
 train$is_named <- "No"
 train$is_named[train$Name != ""] <- "Yes"
@@ -96,7 +101,7 @@ train$yearOutcome <- as.numeric(format(train$DateTime, "%Y"))
 train$monthOutcome <- as.factor(months(train$DateTime))
 train$weekdayOutcome <- as.factor(weekdays(train$DateTime))
 train$dayOutcome <- as.numeric(format(train$DateTime, "%m"))
-train$hourOutcome <- as.numeric(format(train$DateTime, "%H"))
+
 
 train$purebreed <- "Yes"
 train$purebreed[grep("/", as.character(train$Breed))] <- "No"
@@ -115,6 +120,8 @@ train <- train[, -c(2, 3, 7, 8, 9, 10)]
 ########################################
 ## FEATURE CREATION/CLEANUP: TEST SET ##
 ########################################
+
+test$hourOutcome <- hour(test$DateTime)
 
 test$is_named <- "No"
 test$is_named[test$Name != ""] <- "Yes"
@@ -194,7 +201,6 @@ test$yearOutcome <- as.numeric(format(test$DateTime, "%Y"))
 test$monthOutcome <- as.factor(months(test$DateTime))
 test$weekdayOutcome <- as.factor(weekdays(test$DateTime))
 test$dayOutcome <- as.numeric(format(test$DateTime, "%m"))
-test$hourOutcome <- as.numeric(format(test$DateTime, "%H"))
 
 test$purebreed <- "Yes"
 test$purebreed[grep("/", as.character(test$Breed))] <- "No"
@@ -223,24 +229,36 @@ forest <- randomForest(OutcomeType ~ AnimalType + is_named + yearsOld + color1a 
                                weekdayOutcome + dayOutcome + hourOutcome + 
                                purebreed, 
                        data = train, ntree = 1000, 
-                       importance = TRUE)
+                       importance = TRUE, type = "classification")
 
 varImpPlot(forest)
 
-Prediction <- predict(forest, test)
-rfSubmission <- data.frame(Adoption = 0, Died = 0, Euthanasia = 0, 
-                           Return_to_owner = 0, Transfer = 0)
-Prediction <- cbind(Prediction, rfSubmission)
+Prediction <- predict(forest, test, type = "prob")
 
-for(i in 1:length(Prediction)){
-        if(Prediction$Prediction[i] == "Adoption"){
-                Prediction$Adoption[i] == 1
-        } else if (Prediction$Prediction[i] == "Died"){
-                Prediction$Died == 1
-        } else if (Prediction$Prediction[i] == "Euthanasia"){
-                Prediction$Euthanasia[i] == 1
-        } else if (Prediction$Prediction[i] == "Return_to_owner"){
-                Prediction$Return_to_owner[i] == 1
-        }
-                
-}
+submission <- as.data.frame(cbind(test$ID, Prediction))
+names(submission) <- c("ID", "Adoption", "Died", "Euthanasia", 
+                       "Return_to_owner", "Transfer")
+write.csv(submission, "thirdsub.csv", row.names = FALSE)
+
+svm_mod <- svm(OutcomeType ~ yearsOld + fixed + weekdayOutcome + AnimalType + 
+                      color1a + monthOutcome, data = train, probability = TRUE)
+
+svmPred <- predict(svm_mod, test, type = "prob")
+
+
+gbm1 <- gbm(OutcomeType ~ AnimalType + is_named + yearsOld + color1a + color1b + 
+                    color2a + color2b + sexKnown + sex + fixed + yearOutcome + 
+                    monthOutcome + weekdayOutcome + dayOutcome + hourOutcome + 
+                    purebreed, data = train, distribution = "multinomial", 
+            shrinkage = 0.05, n.trees = 500, interaction.depth = 6L, 
+            train.fraction=0.8, keep.data=FALSE, verbose=TRUE)
+
+submission2 <- predict(gbm1, test, type = "response")
+dim(submission2) <- c(nrow(test),5)
+colnames(submission2) <- levels(train$OutcomeType)
+
+options(scipen=100)
+
+sub2 <- data.frame(ID=test$ID)
+sub2 <- cbind(sub2,submission2)
+write.csv(sub2, "fourthsub.csv", row.names = FALSE)
