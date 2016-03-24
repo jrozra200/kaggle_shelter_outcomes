@@ -2,6 +2,7 @@ setwd("~/Google Drive/Grad School/Programming Practice/Shelter Outcomes")
 
 library(plyr)
 library(randomForest)
+library(rpart)
 
 train <- read.csv("train")
 test <- read.csv("test")
@@ -104,6 +105,11 @@ train$purebreed <- as.factor(train$purebreed)
 
 train$newOutcome <- as.factor(paste(train$OutcomeType, train$OutcomeSubtype, sep = "-"))
 
+tree <- rpart(yearsOld ~ AnimalType + is_named + color1a + color1b + color2a +
+                      color2b + sexKnown + sex + fixed + purebreed, data = train)
+guessed_age <- predict(tree, train[is.na(train$yearsOld), ])
+train$yearsOld[is.na(train$yearsOld)] <- guessed_age
+
 train <- train[, -c(2, 3, 7, 8, 9, 10)]
 
 ########################################
@@ -195,7 +201,17 @@ test$purebreed[grep("/", as.character(test$Breed))] <- "No"
 test$purebreed[grep("Mix", as.character(test$Breed))] <- "No"
 test$purebreed <- as.factor(test$purebreed)
 
+tree <- rpart(yearsOld ~ AnimalType + is_named + color1a + color1b + color2a +
+                      color2b + sexKnown + sex + fixed + purebreed, data = test)
+guessed_age <- predict(tree, test[is.na(test$yearsOld), ])
+test$yearsOld[is.na(test$yearsOld)] <- guessed_age
+
 test <- test[, -c(2, 3, 5, 6, 7, 8)]
+
+levels(test$color1a) <- levels(train$color1a)
+levels(test$color1b) <- levels(train$color1b)
+levels(test$color2a) <- levels(train$color2a)
+levels(test$color2b) <- levels(train$color2b)
 
 ######################################################
 ## BUILD A FOREST TO PREDICT THE IMPORTANT FEATURES ##
@@ -206,9 +222,25 @@ forest <- randomForest(OutcomeType ~ AnimalType + is_named + yearsOld + color1a 
                                fixed + yearOutcome + monthOutcome + 
                                weekdayOutcome + dayOutcome + hourOutcome + 
                                purebreed, 
-                       data = train[!is.na(train$yearsOld), ], ntree = 100, 
+                       data = train, ntree = 1000, 
                        importance = TRUE)
 
 varImpPlot(forest)
 
 Prediction <- predict(forest, test)
+rfSubmission <- data.frame(Adoption = 0, Died = 0, Euthanasia = 0, 
+                           Return_to_owner = 0, Transfer = 0)
+Prediction <- cbind(Prediction, rfSubmission)
+
+for(i in 1:length(Prediction)){
+        if(Prediction$Prediction[i] == "Adoption"){
+                Prediction$Adoption[i] == 1
+        } else if (Prediction$Prediction[i] == "Died"){
+                Prediction$Died == 1
+        } else if (Prediction$Prediction[i] == "Euthanasia"){
+                Prediction$Euthanasia[i] == 1
+        } else if (Prediction$Prediction[i] == "Return_to_owner"){
+                Prediction$Return_to_owner[i] == 1
+        }
+                
+}
