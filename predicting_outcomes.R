@@ -9,6 +9,12 @@ library(lubridate)
 
 train <- read.csv("train")
 test <- read.csv("test")
+dogpopularity <- read.csv("popularity.csv")
+dogpopularity$BREED <- tolower(dogpopularity$BREED)
+dogpopularity$BREED <- gsub(pattern = "s$", replacement = "", dogpopularity$BREED)
+catpopularity <- read.csv("popular_cat_breeds.csv")
+catpopularity$BREED <- tolower(catpopularity$BREED)
+catpopularity$BREED <- gsub(pattern = " cat", replacement = "", x = catpopularity$BREED)
 output <- read.csv("sample_submission")
 
 head(train)
@@ -20,6 +26,56 @@ summary(test)
 #########################################
 ## FEATURE CREATION/CLEANUP: TRAIN SET ##
 #########################################
+
+train$Breed1 <- tolower(train$Breed)
+train$Breed1 <- gsub(pattern = " mix", replacement = "", x = train$Breed1)
+train$Breed1 <- gsub(pattern = "black/tan", replacement = "black-tan", x = train$Breed1)
+breed <- strsplit(as.character(train$Breed1), "/")
+breed <- ldply(breed, rbind)
+names(breed) <- c("breed1a", "breed1b")
+
+for(i in 1:dim(breed)[1]) {
+        if(train$AnimalType[i] == "Dog"){
+                pop1 <- dogpopularity$Average[dogpopularity$BREED == breed$breed1a[i]]
+                if(!is.na(breed$breed1b[i])) {
+                        pop2 <- dogpopularity$Average[dogpopularity$BREED == breed$breed1b[i]]
+                } else {
+                        pop2 <- NA
+                }
+        } else {
+                pop1 <- catpopularity$RANK[catpopularity$BREED == breed$breed1a[i]]
+                if(!is.na(breed$breed1b[i])) {
+                        pop2 <- catpopularity$RANK[catpopularity$BREED == breed$breed1b[i]]
+                } else {
+                        pop2 <- NA
+                }
+        }
+        
+        pop1 <- if(length(pop1) == 0) {
+                NA
+        } else {
+                pop1
+        }
+        
+        pop2 <- if(length(pop2) == 0) {
+                NA
+        } else {
+                pop2
+        }
+        
+        train$popularity[i] <- if((is.na(pop1) & is.na(pop2)) == TRUE){
+                0
+        } else if ((!is.na(pop1) & is.na(pop2)) == TRUE) {
+                pop1
+        } else if ((is.na(pop1) & !is.na(pop2)) == TRUE) {
+                pop2
+        } else {
+                (pop1 + pop2) / 2
+        }
+        
+}
+
+train$popularity[train$Breed1 == "pit bull"] <- 11
 
 train$hourOutcome <- hour(train$DateTime)
 
@@ -102,24 +158,79 @@ train$monthOutcome <- as.factor(months(train$DateTime))
 train$weekdayOutcome <- as.factor(weekdays(train$DateTime))
 train$dayOutcome <- as.numeric(format(train$DateTime, "%m"))
 
-
 train$purebreed <- "Yes"
 train$purebreed[grep("/", as.character(train$Breed))] <- "No"
 train$purebreed[grep("Mix", as.character(train$Breed))] <- "No"
 train$purebreed <- as.factor(train$purebreed)
 
-train$newOutcome <- as.factor(paste(train$OutcomeType, train$OutcomeSubtype, sep = "-"))
+for(i in 1:dim(train)[1]){
+        train$nameLength[i] <- nchar(as.character(train$Name[i]))
+}
+
+namelist <- ddply(train, .(Name), summarize, count = length(Name))
+train$nameNormalness <- namelist$count[train$Name]
+train$nameNormalness[train$Name == ""] <- 0
 
 tree <- rpart(yearsOld ~ AnimalType + is_named + color1a + color1b + color2a +
                       color2b + sexKnown + sex + fixed + purebreed, data = train)
 guessed_age <- predict(tree, train[is.na(train$yearsOld), ])
 train$yearsOld[is.na(train$yearsOld)] <- guessed_age
 
-train <- train[, -c(2, 3, 7, 8, 9, 10)]
+train <- train[, -c(2, 3, 7, 8, 9, 10, 11)]
 
 ########################################
 ## FEATURE CREATION/CLEANUP: TEST SET ##
 ########################################
+
+test$Breed1 <- tolower(test$Breed)
+test$Breed1 <- gsub(pattern = " mix", replacement = "", x = test$Breed1)
+test$Breed1 <- gsub(pattern = "black/tan", replacement = "black-tan", x = test$Breed1)
+breed <- strsplit(as.character(test$Breed1), "/")
+breed <- ldply(breed, rbind)
+names(breed) <- c("breed1a", "breed1b")
+
+for(i in 1:dim(breed)[1]) {
+        if(test$AnimalType[i] == "Dog"){
+                pop1 <- dogpopularity$Average[dogpopularity$BREED == breed$breed1a[i]]
+                if(!is.na(breed$breed1b[i])) {
+                        pop2 <- dogpopularity$Average[dogpopularity$BREED == breed$breed1b[i]]
+                } else {
+                        pop2 <- NA
+                }
+        } else {
+                pop1 <- catpopularity$RANK[catpopularity$BREED == breed$breed1a[i]]
+                if(!is.na(breed$breed1b[i])) {
+                        pop2 <- catpopularity$RANK[catpopularity$BREED == breed$breed1b[i]]
+                } else {
+                        pop2 <- NA
+                }
+        }
+        
+        pop1 <- if(length(pop1) == 0) {
+                NA
+        } else {
+                pop1
+        }
+        
+        pop2 <- if(length(pop2) == 0) {
+                NA
+        } else {
+                pop2
+        }
+        
+        test$popularity[i] <- if((is.na(pop1) & is.na(pop2)) == TRUE){
+                0
+        } else if ((!is.na(pop1) & is.na(pop2)) == TRUE) {
+                pop1
+        } else if ((is.na(pop1) & !is.na(pop2)) == TRUE) {
+                pop2
+        } else {
+                (pop1 + pop2) / 2
+        }
+        
+}
+
+test$popularity[test$Breed1 == "pit bull"] <- 11
 
 test$hourOutcome <- hour(test$DateTime)
 
@@ -207,12 +318,21 @@ test$purebreed[grep("/", as.character(test$Breed))] <- "No"
 test$purebreed[grep("Mix", as.character(test$Breed))] <- "No"
 test$purebreed <- as.factor(test$purebreed)
 
+for(i in 1:dim(test)[1]){
+        test$nameLength[i] <- nchar(as.character(test$Name[i]))
+}
+
+namelist <- ddply(test, .(Name), summarize, count = length(Name))
+test$nameNormalness <- namelist$count[test$Name]
+test$nameNormalness[test$Name == ""] <- 0
+
 tree <- rpart(yearsOld ~ AnimalType + is_named + color1a + color1b + color2a +
                       color2b + sexKnown + sex + fixed + purebreed, data = test)
 guessed_age <- predict(tree, test[is.na(test$yearsOld), ])
 test$yearsOld[is.na(test$yearsOld)] <- guessed_age
 
-test <- test[, -c(2, 3, 5, 6, 7, 8)]
+
+test <- test[, -c(2, 3, 5, 6, 7, 8, 9)]
 
 levels(test$color1a) <- levels(train$color1a)
 levels(test$color1b) <- levels(train$color1b)
@@ -223,11 +343,22 @@ levels(test$color2b) <- levels(train$color2b)
 ## BUILD A FOREST TO PREDICT THE IMPORTANT FEATURES ##
 ######################################################
 
+## THIS IS THE WINNER SO FAR - DON'T CHANGE FROM THIS! ## 
 forest <- randomForest(OutcomeType ~ AnimalType + is_named + yearsOld + color1a +
                                color1b + color2a + color2b + sexKnown + sex + 
                                fixed + yearOutcome + monthOutcome + 
                                weekdayOutcome + dayOutcome + hourOutcome + 
-                               purebreed, 
+                               purebreed + popularity, 
+                       data = train, ntree = 1000, 
+                       importance = TRUE, type = "classification")
+
+## MONKEY AWAY ## 
+
+forest <- randomForest(OutcomeType ~ AnimalType + is_named + yearsOld + color1a +
+                               color1b + color2a + color2b + sexKnown + sex + 
+                               fixed + yearOutcome + monthOutcome + 
+                               weekdayOutcome + dayOutcome + hourOutcome + 
+                               purebreed + popularity, 
                        data = train, ntree = 1000, 
                        importance = TRUE, type = "classification")
 
@@ -238,7 +369,7 @@ Prediction <- predict(forest, test, type = "prob")
 submission <- as.data.frame(cbind(test$ID, Prediction))
 names(submission) <- c("ID", "Adoption", "Died", "Euthanasia", 
                        "Return_to_owner", "Transfer")
-write.csv(submission, "thirdsub.csv", row.names = FALSE)
+write.csv(submission, "seventhsub.csv", row.names = FALSE)
 
 svm_mod <- svm(OutcomeType ~ yearsOld + fixed + weekdayOutcome + AnimalType + 
                       color1a + monthOutcome, data = train, probability = TRUE)
@@ -246,12 +377,15 @@ svm_mod <- svm(OutcomeType ~ yearsOld + fixed + weekdayOutcome + AnimalType +
 svmPred <- predict(svm_mod, test, type = "prob")
 
 
-gbm1 <- gbm(OutcomeType ~ AnimalType + is_named + yearsOld + color1a + color1b + 
-                    color2a + color2b + sexKnown + sex + fixed + yearOutcome + 
-                    monthOutcome + weekdayOutcome + dayOutcome + hourOutcome + 
-                    purebreed, data = train, distribution = "multinomial", 
-            shrinkage = 0.05, n.trees = 500, interaction.depth = 6L, 
-            train.fraction=0.8, keep.data=FALSE, verbose=TRUE)
+gbm1 <- gbm(OutcomeType ~ AnimalType + popularity + hourOutcome + 
+                    is_named + yearsOld + color1a + color1b + 
+                    color2a + color2b + sexKnown + sex + 
+                    fixed + yearOutcome + monthOutcome + 
+                    weekdayOutcome + dayOutcome + hourOutcome + 
+                    purebreed + nameLength + nameNormalness, data = train, 
+            distribution = "multinomial", verbose=TRUE, shrinkage = 0.01, 
+            n.trees = 500, interaction.depth = 15, train.fraction=0.8, 
+            keep.data=FALSE)
 
 submission2 <- predict(gbm1, test, type = "response")
 dim(submission2) <- c(nrow(test),5)
@@ -261,4 +395,4 @@ options(scipen=100)
 
 sub2 <- data.frame(ID=test$ID)
 sub2 <- cbind(sub2,submission2)
-write.csv(sub2, "fourthsub.csv", row.names = FALSE)
+write.csv(sub2, "eighththsub.csv", row.names = FALSE)
